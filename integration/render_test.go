@@ -1438,12 +1438,23 @@ patchesStrategicMerge:
 
 resources:
 - ../../base
+
+components:
+- ../../components/label
 `, "overlays/dev/deployment.yaml": `apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: skaffold-kustomize
   labels:
     env: dev # from-param: ${env2}
+`, "components/label/kustomization.yaml": `apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+labels:
+  - includeTemplates: true
+    includeSelectors: false
+    pairs:
+      region: 333a
 `}, expectedOut: `
 apiVersion: apps/v1
 kind: Deployment
@@ -1451,6 +1462,7 @@ metadata:
   labels:
     app: 111a
     env: 222a
+    region: 333a
   name: skaffold-kustomize-dev
 spec:
   selector:
@@ -1460,6 +1472,7 @@ spec:
     metadata:
       labels:
         app: skaffold-kustomize
+        region: 333a
     spec:
       containers:
       - image: skaffold-kustomize
@@ -2050,6 +2063,7 @@ func TestRenderWithPostRenderHook(t *testing.T) {
 		description    string
 		projectDir     string
 		expectedOutput string
+		expectedStderr string
 		args           []string
 	}{
 		{
@@ -2063,7 +2077,7 @@ metadata:
   labels:
     app1: after-change-1
     app2: before-change-2
-         
+
 spec:
   containers:
   - image: us-central1-docker.pkg.dev/k8s-skaffold/testing/multi-config-module1:customtag
@@ -2160,12 +2174,38 @@ spec:
       name: module2
 `,
 		},
+		{
+			description: "single module project, one hook with changes, other without changes and with output",
+			projectDir:  "testdata/post-render-hooks",
+			args:        []string{"-m", "m1", "-p", "one-change-two-without-change-but-with-output", "-t", "customtag"},
+			expectedOutput: `apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app1: before-change-1
+    app2: after-change-2
+  name: module1
+spec:
+  containers:
+    - image: us-central1-docker.pkg.dev/k8s-skaffold/testing/multi-config-module1:customtag
+      name: module1
+`,
+			expectedStderr: `Starting post-render hooks...
+running post-render hook 1
+running post-render hook 2
+Completed post-render hooks`,
+		},
 	}
 
 	for _, test := range tests {
 		testutil.Run(t, test.description, func(t *testutil.T) {
-			output := skaffold.Render(test.args...).InDir(test.projectDir).RunOrFailOutput(t.T)
-			t.CheckDeepEqual(test.expectedOutput, string(output), testutil.YamlObj(t.T))
+			stdout := new(bytes.Buffer)
+			stderr := new(bytes.Buffer)
+			skaffold.Render(test.args...).InDir(test.projectDir).RunWithStdoutAndStderrOrFail(t.T, stdout, stderr)
+			t.CheckDeepEqual(test.expectedOutput, stdout.String(), testutil.YamlObj(t.T))
+			if test.expectedStderr != "" {
+				t.CheckMatches(test.expectedStderr, stderr.String())
+			}
 		})
 	}
 }
@@ -2305,7 +2345,7 @@ spec:
 kind: Deployment
 metadata:
   name: my-nginx
-  annotations: 
+  annotations:
     color: orange
     fruit: apple
 spec:
@@ -2315,7 +2355,7 @@ spec:
       app: nginx
   template:
     metadata:
-      annotations: 
+      annotations:
         color: orange
         fruit: apple
       labels:
